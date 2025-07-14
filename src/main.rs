@@ -11,6 +11,7 @@ use serenity::prelude::*;
 use serenity::all::ExecuteWebhook;
 use serenity::json::json;
 use serenity::all::ChannelId;
+use serenity::all::UserId;
 
 
 const COMMAND_PREFIX: &'static str = "²";
@@ -89,8 +90,8 @@ async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, k
         },
         Some(Identity{keyword:_, nick, avatar}) => (nick, avatar)
     };
-    
-    let audit = format!("User {} speaks with nick {}", user_id, nick);
+    let name = UserId::new(user_id).to_user(&ctx.http).await?.name;
+    let audit = format!("User {} (id: {}) speaks with nick {}", name, user_id, nick);
 
     say_with_hook(ctx, channel_id, nick, Some(avatar), text, Some(audit.as_str())).await?;
 
