@@ -1,0 +1,94 @@
+struct Database{}
+
+
+impl Database
+{
+    fn init() -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+
+        conn.execute(
+            "create table if not exists identities_table (
+             id integer primary key,
+             userid integer,
+             keyword text not null,
+             nick text not null,
+             avatar text not null
+             )",
+            (),
+        )?;
+
+        Ok(())
+    }
+    
+    async fn get_identities(user_id: u64) -> Result<Vec<Identity>, Error>
+    {
+
+        
+        let conn = Connection::open("database.db")?;
+        let mut stmt = conn.prepare("SELECT userid, keyword, nick, avatar FROM identities_table WHERE userid=(?1);")?;
+
+        let identities_iter = stmt.query_map(&[&user_id], |row| {
+            Ok(Identity {
+                keyword: row.get::<_, String>(1)?,
+                nick: row.get::<_, String>(2)?,
+                avatar: row.get::<_, String>(3)?,
+            })
+        })?;
+
+        Ok(identities_iter
+           .filter_map(|result| result.ok())
+           .collect())
+    }
+    async fn get_identity(user_id: u64, keyword: &str) -> Result<Option<Identity>, Error>
+    {
+
+        println!("Querrying {user_id:?}  {keyword:?}");
+        
+        let conn = Connection::open("database.db")?;
+        let mut stmt = conn.prepare("SELECT userid, keyword, nick, avatar
+                                     FROM identities_table
+                                     WHERE userid=(?1) AND keyword=(?2);")?;
+
+        let identities_iter = stmt.query_map((&user_id, keyword), |row| {
+            Ok(Identity {
+                keyword: row.get::<_, String>(1)?,
+                nick: row.get::<_, String>(2)?,
+                avatar: row.get::<_, String>(3)?,
+            })
+        })?;
+        let res = identities_iter
+            .filter_map(|result| {println!("  {:?}", result); result.ok()})
+           .next();
+        Ok(res)
+    }
+    async fn add_identity(user_id: u64, keyword: &str, nick: &str, avatar: &str) -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+        
+        if let Err(why) = conn.execute(
+            "INSERT INTO identities_table (userid, keyword, nick, avatar)
+                     values (?1, ?2, ?3, ?4)",
+            (user_id, keyword, nick, avatar),
+        )
+        {
+            println!("Error inserting new nick ({why:?})");
+        }
+        Ok(())
+    }
+    
+    async fn remove_identity(user_id: u64, keyword: &str) -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+
+        if let Err(why) = conn.execute(
+            "DELETE FROM identities_table  where userid = (?1) AND keyword = (?2);",
+            (user_id, keyword),
+        )
+        {
+            println!("Error deleting nick ({why:?})");
+        }
+
+        Ok(())
+    }
+}

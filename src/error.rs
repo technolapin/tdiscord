@@ -1,0 +1,42 @@
+#[derive(Debug, Clone)]
+pub struct Error(String);
+
+impl Error
+{
+    pub fn new(msg: &str) -> Self
+    {
+        Self(String::from(msg))
+    }
+
+    pub fn from_other<E: std::fmt::Debug>(err: E) -> Self
+    {
+        Self(format!("{:?}", err))
+    }
+
+    pub fn convert_result<T, E: std::fmt::Debug>(res: Result<T, E>) -> Result<T, Self>
+    {
+        match res
+        {
+            Ok(thing) => Ok(thing),
+            Err(err) => Err(Self::from_other(err))
+        }
+    }
+}
+
+
+
+macro_rules! impl_from {
+    ($t:path) => {
+        impl From<$t> for Error
+        {
+            fn from(err: $t) -> Self
+            {
+                Self(format!("{}", err))
+            }
+        }
+    };
+}
+
+impl_from!(rusqlite::Error);
+impl_from!(serenity::prelude::SerenityError);
+

@@ -1,0 +1,321 @@
+use rusqlite::{Connection, Result};
+#[derive(Debug, Clone)]
+struct Error(String);
+
+impl Error
+{
+    pub fn new(msg: &str) -> Self
+    {
+        Self(String::from(msg))
+    }
+
+    pub fn from_other<E: std::fmt::Debug>(err: E) -> Self
+    {
+        Self(format!("{:?}", err))
+    }
+
+    pub fn convert_result<T, E: std::fmt::Debug>(res: Result<T, E>) -> Result<T, Self>
+    {
+        match res
+        {
+            Ok(thing) => Ok(thing),
+            Err(err) => Err(Self::from_other(err))
+        }
+    }
+}
+
+
+
+macro_rules! impl_from {
+    ($t:path) => {
+        impl From<$t> for Error
+        {
+            fn from(err: $t) -> Self
+            {
+                Self(format!("{}", err))
+            }
+        }
+    };
+}
+
+impl_from!(rusqlite::Error);
+impl_from!(serenity::prelude::SerenityError);
+
+
+
+const COMMAND_PREFIX: &'static str = "²";
+
+
+use std::env;
+
+use serenity::async_trait;
+use serenity::model::channel::Message;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
+use serenity::all::{CreateAttachment};
+use serenity::builder::CreateWebhook;
+use serenity::all::Webhook;
+use serenity::all::ExecuteWebhook;
+use serenity::all::EditWebhook;
+use serenity::json::json;
+
+struct Handler;
+
+fn sanitize<'a>(txt: &'a str) -> &'a str
+{
+    let mut start: usize = 0;
+    while (txt[start..].starts_with(COMMAND_PREFIX))
+    {
+        start += COMMAND_PREFIX.len();
+    }
+    let out = &txt[start..];
+    out
+}
+
+
+
+fn parse_text<'a>(raw_txt: &'a str) -> Option<(&'a str, &'a str)>
+{
+    let text = sanitize(raw_txt);
+    let keyword: &str = match text.split_whitespace().nth(0)
+    {
+        None => {print!("No nickname keyword!"); return None;},
+        Some(s) => s
+    };
+    let keywordpos = match text.find(keyword)
+    {
+        None => {print!("Cannot find start of keyword!!"); return None;},
+        Some(i) => i
+    };
+    let actual_text = sanitize(&text[(keywordpos+keyword.len()) ..]);
+
+    Some((keyword, actual_text))
+}
+
+
+async fn process_message(ctx: Context, msg: Message) -> Result<(), Error>
+{
+        if msg.content.starts_with(COMMAND_PREFIX)
+        {
+            let user_id: u64 = msg.author.id.get();
+            let guild_id: u64 = msg.guild_id.ok_or(Error::new("Couldnt retrieve guild id"))?.get();
+            let (keyword, actual_text) = match parse_text(msg.content.as_str())
+            {
+                None => return Ok(()),
+                Some((a,b)) => (a,b)
+            };
+            
+            match keyword
+            {
+                "help" =>
+                {
+                    if let Err(why) = msg.channel_id.say(&ctx.http, "Démerde-toi").await
+                    {
+                        println!("Error sending message: {why:?}");
+                    }
+                },
+                "register" =>
+                {
+                    let conn = Connection::open("database.db")?;
+                    let (keyword, nick) = match parse_text(actual_text)
+                    {
+                        Some(stuff) => stuff,
+                        None => {
+                            if let Err(why) = msg.channel_id.say(&ctx.http, "Malformed register command!").await
+                            {
+                                println!("Error sending message: {why:?}");
+                            }
+                            return Ok(());
+                        }
+                    };
+                    
+                    let avatar = if msg.attachments.len() == 0
+                    {
+                        match msg.author.avatar.map(|h| format!("{h:?}"))
+                        {
+                            Some(hash) => format!("https://cdn.discordapp.com/avatars/{:?}/{:?}.png", user_id, &hash[1..hash.len()-1]),
+                            None => "https://pbs.twimg.com/media/GvIpQVUWAAAmcsO?format=jpg&name=4096x4096".to_owned()
+                        }
+                    }
+                    else
+                    {
+                        msg.attachments[0].url.clone()
+                    };
+                    
+                    if let Err(why) = conn.execute(
+                        "INSERT INTO identities_table (userid, keyword, nick, avatar)
+                     values (?1, ?2, ?3, ?4)",
+                        (user_id, keyword, nick, avatar.as_str()),
+                    )
+                    {
+                        println!("Error inserting new nick ({why:?})");
+                    }
+                    return Ok(());
+                    
+                },
+                "forget" =>
+                {
+                    let conn = Connection::open("database.db")?;
+                    let (keyword, _) = match parse_text(actual_text)
+                    {
+                        Some(stuff) => stuff,
+                        None => {
+                            if let Err(why) = msg.channel_id.say(&ctx.http, "Malformed forget command!").await
+                            {
+                                println!("Error sending message: {why:?}");
+                            }
+                            return Ok(());
+                        }
+                    };
+
+                    if let Err(why) = conn.execute(
+                        "DELETE FROM identities_table  where userid = (?1) AND keyword = (?2);",
+                        (user_id, keyword),
+                    )
+                    {
+                        println!("Error deleting nick ({why:?})");
+                    }
+                    return Ok(());
+                    
+                },
+                _ => ()
+            }
+            let maybenickandavatar = async
+            {
+                let conn = Connection::open("database.db")?;
+                let mut stmt = conn.prepare(
+                    "SELECT userid, keyword, nick, avatar FROM identities_table
+                     WHERE userid=(?1) AND keyword=(?2)
+                     ;"
+                )?;
+
+
+                let maybenickandavatar= stmt.query_map((&user_id, keyword), |row| {
+                    Ok((row.get(2),row.get(3)))
+                })?.filter_map(|result| result.ok()).next();
+                maybenickandavatar
+            }.await;
+            
+            let mut hook = async
+            {
+
+                let map = json!({"name": "Momo's hook"});
+                let webhook = ctx.http.create_webhook(msg.channel_id, &map, None).await?;
+                let url = webhook.url()?;
+
+                webhook                
+            }.await;
+
+            let (nick, avatar): (String, String)= match maybenickandavatar
+            {
+                None =>
+                {
+                    if let Err(why) = msg.channel_id.say(&ctx.http, format!("Nickname {keyword} does not exist for you!")).await {
+                        println!("Error sending message: {why:?}");
+                    }
+                    return Ok(());
+                    
+                },
+                Some(nick) => (nick.0?, nick.1?)
+            };
+            if let Err(why) = msg.delete(&ctx.http).await {
+                println!("couldnt delete message! {why:?}");
+            }
+            let audit = format!("User {} speaks with nick {}", user_id, nick);
+
+            let editbuilder = EditWebhook::new().audit_log_reason("Moved chan").channel_id(msg.channel_id.get());
+            if let Err(why) = hook.edit(&ctx.http, editbuilder).await
+            {
+                println!("couldnt move webhook! {why:?}");
+                
+            }
+
+            let builder = ExecuteWebhook::new()
+                .username(nick.as_str())
+                .avatar_url(avatar.as_str())
+                .content(actual_text);
+
+            
+            
+            
+
+            
+            hook.execute(&ctx.http, false, builder).await?;
+            
+            hook.delete(&ctx.http).await?;
+                
+        }
+    Ok(())
+    
+}
+
+#[async_trait]
+impl EventHandler for Handler {
+    // Set a handler for the `message` event. This is called whenever a new message is received.
+    //
+    // Event handlers are dispatched through a threadpool, and so multiple events can be
+    // dispatched simultaneously.
+    async fn message(&self, ctx: Context, msg: Message)
+    {
+        if let Err(why) = process_message(ctx, msg).await
+        {
+            println!("Error processing message: {why:?}");
+        }
+    }
+
+    // Set a handler to be called on the `ready` event. This is called when a shard is booted, and
+    // a READY payload is sent by Discord. This payload contains data like the current user's guild
+    // Ids, current user data, private channels, and more.
+    //
+    // In this case, just print what the current user's username is.
+    async fn ready(&self, _: Context, ready: Ready) {
+        println!("{} is connected!", ready.user.name);
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // Configure the client with your Discord bot token in the environment.
+    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    // Set gateway intents, which decides what events the bot will be notified about
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+
+    // Create a new instance of the Client, logging in as a bot. This will automatically prepend
+    // your bot token with "Bot ", which is a requirement by Discord for bot users.
+    let mut client =
+        Client::builder(&token, intents).event_handler(Handler).await.expect("Err creating client");
+
+    {
+        let conn = Connection::open("database.db").unwrap();
+
+        conn.execute(
+            "create table if not exists identities_table (
+             id integer primary key,
+             userid integer,
+             keyword text not null,
+             nick text not null,
+             avatar text not null
+             )",
+            (),
+        ).unwrap();
+        conn.execute(
+            "create table if not exists webhooks_table (
+             id integer primary key,
+             guildid integer,
+             webhook text not null
+             )",
+            (),
+        ).unwrap();
+    }
+
+    
+    // Finally, start a single shard, and start listening to events.
+    //
+    // Shards will automatically attempt to reconnect, and will perform exponential backoff until
+    // it reconnects.
+    if let Err(why) = client.start().await {
+        println!("Client error: {why:?}");
+    }
+}
