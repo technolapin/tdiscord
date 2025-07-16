@@ -145,7 +145,10 @@ async fn process_message(ctx: Context, msg: Message) -> Result<(), Error>
 | talk through to identity automaticaly | {COMMAND_PREFIX}switch <keyword>                                          |
 | stop speaking through identity        | {COMMAND_PREFIX}stop                                                      |
 
-Any other command will be interpreted as a keyword for a personality```"#)
+Any other command will be interpreted as a keyword for a personality.
+```
+You can delete message sent through your personalities by reacting with :x:.
+"#)
                 ).await?;
             },
             "list" =>
