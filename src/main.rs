@@ -14,7 +14,7 @@ use serenity::all::ChannelId;
 use serenity::all::UserId;
 
 
-const COMMAND_PREFIX: &'static str = "²";
+const COMMAND_PREFIX: &'static str = ";";
 
 
 
