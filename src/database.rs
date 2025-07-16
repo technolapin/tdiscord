@@ -37,6 +37,15 @@ impl Database
              )",
             (),
         )?;
+
+        conn.execute(
+            "create table if not exists msg_table (
+             id integer primary key,
+             msgid integer,
+             userid integer
+             )",
+            (),
+        )?;
         
         Ok(())
     }
@@ -51,7 +60,7 @@ impl Database
             Ok(row.get::<_, String>(1)?)
         })?;
         let res = identities_iter
-            .filter_map(|result| {println!("  {:?}", result); result.ok()})
+            .filter_map(|result| result.ok())
            .next();
         Ok(res)
         
@@ -86,6 +95,36 @@ impl Database
         Ok(())
         
     }
+
+    pub async fn record_message(user_id: u64, msg_id: u64) -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+        
+        if let Err(why) = conn.execute(
+            "INSERT INTO msg_table (msgid, userid)
+                     values (?1, ?2)",
+            (msg_id, user_id),
+        )
+        {
+            println!("Error inserting new message ({why:?})");
+        }
+        Ok(())
+        
+    }
+    pub async fn get_message_owner(msg_id: u64) -> Result<Option<u64>, Error>
+    {
+        let conn = Connection::open("database.db")?;
+        let mut stmt = conn.prepare("SELECT msgid, userid FROM msg_table WHERE msgid=(?1);")?;
+
+        Ok(stmt.query_map(&[&msg_id], |row|
+                          {
+                              Ok(row.get::<_, u64>(1)?)
+                          })?.filter_map(|result| result.ok()).next())
+            
+
+    }
+
+
     pub async fn get_identities(user_id: u64) -> Result<Vec<Identity>, Error>
     {
 
@@ -120,7 +159,7 @@ impl Database
             })
         })?;
         let res = identities_iter
-            .filter_map(|result| {println!("  {:?}", result); result.ok()})
+            .filter_map(|result| result.ok())
            .next();
         Ok(res)
     }

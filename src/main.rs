@@ -53,7 +53,7 @@ fn parse_text<'a>(raw_txt: &'a str) -> Option<(&'a str, &'a str)>
 
 use serenity::all::{Attachment, CreateAttachment};
 
-async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avatar: Option<String>, text: &str, audit: Option<&str>, attachments: &Vec<Attachment>) -> Result<(), Error>
+async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avatar: Option<String>, text: &str, audit: Option<&str>, attachments: &Vec<Attachment>) -> Result<Option<Message>, Error>
 {
     let map = json!({"name": "Momo's hook"});
     let hook = ctx.http.create_webhook(channel_id, &map, audit).await?;
@@ -77,10 +77,10 @@ async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avata
     );
 
     
-    hook.execute(&ctx.http, false, builder).await?;
+    let result = hook.execute(&ctx.http, true, builder).await?;
     
     hook.delete(&ctx.http).await?;
-    Ok(())
+    Ok(result)
 }
 
 
@@ -103,7 +103,16 @@ async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, k
     let name = UserId::new(user_id).to_user(&ctx.http).await?.name;
     let audit = format!("User {} (id: {}) speaks with nick {}", name, user_id, nick);
 
-    say_with_hook(ctx, channel_id, nick, Some(avatar), text, Some(audit.as_str()), attachments).await?;
+    if let Some(msg) = say_with_hook(ctx, channel_id, nick, Some(avatar), text, Some(audit.as_str()), attachments).await?
+    {
+        println!("Just sent message of id {}", msg.id.get());
+        Database::record_message(user_id, msg.id.get()).await?;
+    }
+    else
+    {
+        println!("COULD NOT MESSAGE JUST EMITED!");
+    }
+
 
     
     
@@ -249,6 +258,28 @@ Any other command will be interpreted as a keyword for a personality```"#)
     Ok(())
         
 }
+ use serenity::all::Reaction;
+use serenity::all::ReactionType::Unicode;
+
+async fn process_reaction_add(ctx: Context, rea: Reaction) -> Result<(), Error>
+{
+    let msg_id = rea.message_id.get();
+    if let Some(user) = rea.user_id
+    {
+        let user_id = user.get();
+        let maybeuserid = Database::get_message_owner(msg_id).await?;
+        if Some(user_id) == maybeuserid
+        {
+            let msg = &ctx.http.get_message(rea.channel_id, rea.message_id).await?;
+            if rea.emoji.unicode_eq("❌")
+            {
+                msg.delete(&ctx.http).await?;
+            }
+        }
+    }
+    Ok(())
+    
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -261,6 +292,14 @@ impl EventHandler for Handler {
         if let Err(why) = process_message(ctx, msg).await
         {
             println!("Error processing message: {why:?}");
+        }
+    }
+
+    async fn reaction_add(&self, ctx: Context, rea: Reaction)
+    {
+        if let Err(why) = process_reaction_add(ctx, rea).await
+        {
+            println!("Error processing reaction: {why:?}");
         }
     }
 
@@ -282,7 +321,8 @@ async fn main() -> Result<(), Error>
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT;
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_MESSAGE_REACTIONS;
 
     // Create a new instance of the Client, logging in as a bot. This will automatically prepend
     // your bot token with "Bot ", which is a requirement by Discord for bot users.
