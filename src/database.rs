@@ -29,9 +29,63 @@ impl Database
             (),
         )?;
 
+        conn.execute(
+            "create table if not exists switch_table (
+             id integer primary key,
+             userid integer unique,
+             keyword text not null
+             )",
+            (),
+        )?;
+        
         Ok(())
     }
-    
+    pub async fn get_switch(user_id: u64) -> Result<Option<String>, Error>
+    {
+        let conn = Connection::open("database.db")?;
+        let mut stmt = conn.prepare("SELECT userid, keyword
+                                     FROM switch_table
+                                     WHERE userid=(?1);")?;
+
+        let identities_iter = stmt.query_map(&[&user_id], |row| {
+            Ok(row.get::<_, String>(1)?)
+        })?;
+        let res = identities_iter
+            .filter_map(|result| {println!("  {:?}", result); result.ok()})
+           .next();
+        Ok(res)
+        
+    }
+    pub async fn delete_switch(user_id: u64) -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+
+        if let Err(why) = conn.execute(
+            "DELETE FROM switch_table  where userid = (?1);",
+            &[&user_id],
+        )
+        {
+            println!("Error deleting switch ({why:?})");
+        }
+
+        Ok(())
+        
+    }
+    pub async fn set_switch(user_id: u64, keyword: &str) -> Result<(), Error>
+    {
+        let conn = Connection::open("database.db")?;
+        
+        if let Err(why) = conn.execute(
+            "INSERT OR REPLACE INTO switch_table (userid, keyword)
+                     values (?1, ?2)",
+            (user_id, keyword),
+        )
+        {
+            println!("Error inserting new switch ({why:?})");
+        }
+        Ok(())
+        
+    }
     pub async fn get_identities(user_id: u64) -> Result<Vec<Identity>, Error>
     {
 
@@ -53,9 +107,6 @@ impl Database
     }
     pub async fn get_identity(user_id: u64, keyword: &str) -> Result<Option<Identity>, Error>
     {
-
-        println!("Querrying {user_id:?}  {keyword:?}");
-        
         let conn = Connection::open("database.db")?;
         let mut stmt = conn.prepare("SELECT userid, keyword, nick, avatar
                                      FROM identities_table

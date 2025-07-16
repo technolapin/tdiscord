@@ -102,100 +102,131 @@ async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, k
 
 async fn process_message(ctx: Context, msg: Message) -> Result<(), Error>
 {
-        if msg.content.starts_with(COMMAND_PREFIX)
+    let user_id: u64 = msg.author.id.get();
+    if msg.content.starts_with(COMMAND_PREFIX)
+    {
+        //            let guild_id: u64 = msg.guild_id.ok_or(Error::new("Couldnt retrieve guild id"))?.get();
+        let (keyword, actual_text) = match parse_text(msg.content.as_str())
         {
-            let user_id: u64 = msg.author.id.get();
-//            let guild_id: u64 = msg.guild_id.ok_or(Error::new("Couldnt retrieve guild id"))?.get();
-            let (keyword, actual_text) = match parse_text(msg.content.as_str())
+            None => return Ok(()),
+            Some((a,b)) => (a,b)
+        };
+        
+        match keyword
+        {
+            "help" =>
             {
-                None => return Ok(()),
-                Some((a,b)) => (a,b)
-            };
-            
-            match keyword
+                msg.channel_id.say(&ctx.http, "Command list:```\nhelp\nlist\nregister <keyword> <nickname> [attached image for avatar]\nforget <keyword>\n\nAny other command will be interpreted as a keyword for a personality```").await?;
+            },
+            "list" =>
             {
-                "help" =>
+                let identities = Database::get_identities(user_id).await?;
+
+                if identities.len() == 0
                 {
-                    msg.channel_id.say(&ctx.http, "Command list:```\nhelp\nlist\nregister <keyword> <nickname> [attached image for avatar]\nforget <keyword>\n\nAny other command will be interpreted as a keyword for a personality```").await?;
-                },
-                "list" =>
-                {
-                    let identities = Database::get_identities(user_id).await?;
-
-                    if identities.len() == 0
-                    {
-                        msg.channel_id.say(&ctx.http, "You have no registerd identities").await?;
-                    }
-                    else
-                    {
-                        let mut txt = format!("Your registered identities:```");
-                        for Identity{keyword, nick, ..} in identities
-                        {
-                            txt = format!("{}\n{} | {}", txt, keyword, nick);
-                        }
-                        txt += "```";
-                        msg.channel_id.say(&ctx.http, txt.as_str()).await?;
-
-                    }
-                    
-                },
-                "register" =>
-                {
-                    let (keyword, nick) = match parse_text(actual_text)
-                    {
-                        Some(stuff) => stuff,
-                        None => {
-                            msg.channel_id.say(&ctx.http, "Malformed register command!").await?;
-                            return Ok(());
-                        }
-                    };
-                    
-                    let avatar = if msg.attachments.len() == 0
-                    {
-                        match msg.author.avatar.map(|h| format!("{h:?}"))
-                        {
-                            Some(hash) => format!("https://cdn.discordapp.com/avatars/{:?}/{:?}.png", user_id, &hash[1..hash.len()-1]),
-                            None => "https://pbs.twimg.com/media/GvIpQVUWAAAmcsO?format=jpg&name=4096x4096".to_owned()
-                        }
-                    }
-                    else
-                    {
-                        msg.attachments[0].url.clone()
-                    };
-
-                    Database::add_identity(user_id, keyword, nick, avatar.as_str()).await?;
-
-                    say_with_identity(&ctx, msg.channel_id, user_id, keyword, "Identity registered.").await?;
-
-                    
-                },
-                "forget" =>
-                {
-                    let (keyword, _) = match parse_text(actual_text)
-                    {
-                        Some(stuff) => stuff,
-                        None => {
-                            msg.channel_id.say(&ctx.http, "Malformed forget command!").await?;
-                            return Ok(());
-                        }
-                    };
-
-                    Database::remove_identity(user_id, keyword).await?;
-                    msg.channel_id.say(&ctx.http, format!("Removed identity '{}'", keyword)).await?;
-
-                },
-                _ =>
-                {
-                    say_with_identity(&ctx, msg.channel_id, user_id, keyword, actual_text).await?;
-                    msg.delete(&ctx.http).await?;
-                    
+                    msg.channel_id.say(&ctx.http, "You have no registerd identities").await?;
                 }
-            }
+                else
+                {
+                    let mut txt = format!("Your registered identities:```");
+                    for Identity{keyword, nick, ..} in identities
+                    {
+                        txt = format!("{}\n{} | {}", txt, keyword, nick);
+                    }
+                    txt += "```";
+                    msg.channel_id.say(&ctx.http, txt.as_str()).await?;
+
+                }
+                
+            },
+            "register" =>
+            {
+                let (keyword, nick) = match parse_text(actual_text)
+                {
+                    Some(stuff) => stuff,
+                    None => {
+                        msg.channel_id.say(&ctx.http, "Malformed register command!").await?;
+                        return Ok(());
+                    }
+                };
+                
+                let avatar = if msg.attachments.len() == 0
+                {
+                    match msg.author.avatar.map(|h| format!("{h:?}"))
+                    {
+                        Some(hash) => format!("https://cdn.discordapp.com/avatars/{:?}/{:?}.png", user_id, &hash[1..hash.len()-1]),
+                        None => "https://pbs.twimg.com/media/GvIpQVUWAAAmcsO?format=jpg&name=4096x4096".to_owned()
+                    }
+                }
+                else
+                {
+                    msg.attachments[0].url.clone()
+                };
+
+                Database::add_identity(user_id, keyword, nick, avatar.as_str()).await?;
+
+                say_with_identity(&ctx, msg.channel_id, user_id, keyword, "Identity registered.").await?;
 
                 
+            },
+            "forget" =>
+            {
+                let (keyword, _) = match parse_text(actual_text)
+                {
+                    Some(stuff) => stuff,
+                    None => {
+                        msg.channel_id.say(&ctx.http, "Malformed forget command!").await?;
+                        return Ok(());
+                    }
+                };
+
+                Database::remove_identity(user_id, keyword).await?;
+                msg.channel_id.say(&ctx.http, format!("Removed identity '{}'", keyword)).await?;
+
+            },
+            "switch" =>
+            {
+                let (keyword, _) = match parse_text(actual_text)
+                {
+                    Some(stuff) => stuff,
+                    None => {
+                        msg.channel_id.say(&ctx.http, "Malformed switch command!").await?;
+                        return Ok(());
+                    }
+                };
+                if let Some(identity) = Database::get_identity(user_id, keyword).await?
+                {
+                    Database::set_switch(user_id, keyword).await?;
+                    msg.channel_id.say(&ctx.http, format!("User now speaks as '{}'", identity.nick)).await?;
+                }
+                else
+                {
+                    msg.channel_id.say(&ctx.http, format!("No identity '{}' for this user", keyword)).await?;
+                }
+            },
+            "stop" =>
+            {
+                Database::delete_switch(user_id).await?;
+                msg.channel_id.say(&ctx.http, format!("User unswitched")).await?;
+            },
+            _ =>
+            {
+                say_with_identity(&ctx, msg.channel_id, user_id, keyword, actual_text).await?;
+                msg.delete(&ctx.http).await?;
+                
+            }
         }
+
+        
+    }
+    else if let Some(keyword) = Database::get_switch(user_id).await?
+    {
+        
+        say_with_identity(&ctx, msg.channel_id, user_id, keyword.as_str(), msg.content.as_str()).await?;
+        msg.delete(&ctx.http).await?;
+    }
     Ok(())
-    
+        
 }
 
 #[async_trait]
