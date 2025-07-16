@@ -116,7 +116,18 @@ async fn process_message(ctx: Context, msg: Message) -> Result<(), Error>
         {
             "help" =>
             {
-                msg.channel_id.say(&ctx.http, "Command list:```\nhelp\nlist\nregister <keyword> <nickname> [attached image for avatar]\nforget <keyword>\n\nAny other command will be interpreted as a keyword for a personality```").await?;
+                msg.channel_id.say(&ctx.http,
+                                   format!(r#"Command list:
+```
+| display this message                  | {COMMAND_PREFIX}help                                                      |
+| list all your identities              | {COMMAND_PREFIX}list                                                      |
+| add a new identity                    | {COMMAND_PREFIX}register <keyword> <nickname> [attached image for avatar] |
+| remove identity                       | {COMMAND_PREFIX}forget <keyword>                                          |
+| talk through to identity automaticaly | {COMMAND_PREFIX}switch <keyword>                                          |
+| stop speaking through identity        | {COMMAND_PREFIX}stop                                                      |
+
+Any other command will be interpreted as a keyword for a personality```"#)
+                ).await?;
             },
             "list" =>
             {
