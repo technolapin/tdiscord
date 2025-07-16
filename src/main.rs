@@ -51,8 +51,9 @@ fn parse_text<'a>(raw_txt: &'a str) -> Option<(&'a str, &'a str)>
     Some((keyword, actual_text))
 }
 
+use serenity::all::{Attachment, CreateAttachment};
 
-async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avatar: Option<String>, text: &str, audit: Option<&str>) -> Result<(), Error>
+async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avatar: Option<String>, text: &str, audit: Option<&str>, attachments: &Vec<Attachment>) -> Result<(), Error>
 {
     let map = json!({"name": "Momo's hook"});
     let hook = ctx.http.create_webhook(channel_id, &map, audit).await?;
@@ -64,9 +65,18 @@ async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avata
     {
         builder = builder.avatar_url(avatar.as_str());
     }
-    
     builder = builder.content(text);
 
+    let mut attachments_creators = vec![];
+    for att in attachments
+    {
+        attachments_creators.push(CreateAttachment::url(&ctx.http, att.url.as_str()).await?);
+    }
+    builder = builder.add_files(
+        attachments_creators
+    );
+
+    
     hook.execute(&ctx.http, false, builder).await?;
     
     hook.delete(&ctx.http).await?;
@@ -77,7 +87,7 @@ async fn say_with_hook(ctx: &Context, channel_id: ChannelId, nick: String, avata
     
 
 
-async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, keyword: &str, text: &str) -> Result<(), Error>
+async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, keyword: &str, text: &str, attachments: & Vec<Attachment>) -> Result<(), Error>
 {
     let identity = Database::get_identity(user_id, keyword).await?;
     
@@ -93,7 +103,7 @@ async fn say_with_identity(ctx: &Context, channel_id: ChannelId, user_id: u64, k
     let name = UserId::new(user_id).to_user(&ctx.http).await?.name;
     let audit = format!("User {} (id: {}) speaks with nick {}", name, user_id, nick);
 
-    say_with_hook(ctx, channel_id, nick, Some(avatar), text, Some(audit.as_str())).await?;
+    say_with_hook(ctx, channel_id, nick, Some(avatar), text, Some(audit.as_str()), attachments).await?;
 
     
     
@@ -176,7 +186,7 @@ Any other command will be interpreted as a keyword for a personality```"#)
 
                 Database::add_identity(user_id, keyword, nick, avatar.as_str()).await?;
 
-                say_with_identity(&ctx, msg.channel_id, user_id, keyword, "Identity registered.").await?;
+                say_with_identity(&ctx, msg.channel_id, user_id, keyword, "Identity registered.", &vec![]).await?;
 
                 
             },
@@ -222,7 +232,7 @@ Any other command will be interpreted as a keyword for a personality```"#)
             },
             _ =>
             {
-                say_with_identity(&ctx, msg.channel_id, user_id, keyword, actual_text).await?;
+                say_with_identity(&ctx, msg.channel_id, user_id, keyword, actual_text, &msg.attachments).await?;
                 msg.delete(&ctx.http).await?;
                 
             }
@@ -233,7 +243,7 @@ Any other command will be interpreted as a keyword for a personality```"#)
     else if let Some(keyword) = Database::get_switch(user_id).await?
     {
         
-        say_with_identity(&ctx, msg.channel_id, user_id, keyword.as_str(), msg.content.as_str()).await?;
+        say_with_identity(&ctx, msg.channel_id, user_id, keyword.as_str(), msg.content.as_str(), &msg.attachments).await?;
         msg.delete(&ctx.http).await?;
     }
     Ok(())
